@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+		<title>Session {{id_display}}</title>
+        <link rel="stylesheet" href="/static/css/session.css">
+        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;700&display=swap" rel="stylesheet"> 
+		<script src="https://d3js.org/d3.v6.min.js"></script>
+    </head>
+    <body>
+		<div id="left">
+		</div>
+		<div id="center">
+				<div id="title"></div>
+				<div id="timer"></div>
+				<div>
+					<button id="buzzer">BUZZ</button>
+				</div>
+				<div id="users"></div>
+				<div id="name_prompt">
+					<label for="name">Your name: </label>
+					<input id="name" name="name" type="text" />
+				</div>
+		</div>
+		<div id="right">
+			<div id="admin">
+				<div>Admin Menu</div>
+				<div><button id="resume_session">Start or resume session</button></div>
+				<div><button id="reset_session">Reset session</button></div>
+				<div>
+					<label for="session_name">Session name: </label>
+					<input id="session_name" name="session_name" type="text" />
+				</div>
+				<div>
+					<label for="session_timer">Session timer (seconds): </label>
+					<input id="session_timer" name="session_timer" type="number" />
+				</div>
+			</div>
+		</div>
+		<script>
+			let session_id = "{{id}}";
+		</script>
+		<script src="/static/js/session.js"></script>
+	</body>
+</html>

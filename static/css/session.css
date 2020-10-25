@@ -1,0 +1,140 @@
+html {
+	height: 100%;
+	width: 100%;
+	font-family: "Noto Sans", sans-serif;
+}
+
+body {
+	padding: 1em;
+	margin: 0;
+	padding: 0;
+	height: 100%;
+	width: 100%;
+	display: flex;
+	flex-direction: row;
+	align-items: stretch;
+}
+
+#left::before {
+	z-index: -1;
+	content: "";
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	background-image: url("/static/img/pampafonddufond.png");
+	background-color: green;
+	background-repeat: no-repeat;
+}
+
+#left {
+	position: relative;
+	padding: 1em;
+	flex-grow: 1;
+	width: 25%;
+}
+
+#center {
+	background-image: url("/static/img/pampafond.png");
+	background-color: #9cb997;
+	background-repeat: no-repeat;
+	background-position: bottom;
+	padding: 1em;
+	width: 50%;
+	flex-grow: 2;
+	display: flex;
+	flex-direction: column;
+	justify-content: start;
+	align-items: center;
+}
+
+#right::before {
+	z-index: -1;
+	content: "";
+	position: absolute;
+	top: 0;
+	right: 0;
+	width: 100%;
+	height: 100%;
+	background-image: url("/static/img/pampafonddufond.png");
+	background-color: green;
+	background-repeat: no-repeat;
+	transform: scaleX(-1);
+}
+
+#right {
+	position: relative;
+	padding: 1em;
+	width: 25%;
+	flex-grow: 1;
+	display: flex;
+}
+
+#center>div {
+	margin: 1rem;
+}
+
+#title {
+	text-align: center;
+	font-size: 6em;
+}
+
+#timer {
+	background-color: lightgray;
+	display: inline-block;
+	margin: 0 auto;
+	text-align: center;
+	font-size: 3em;
+	border: thick solid black;
+}
+
+#users {
+	align-self: start;
+	height: max-content;
+	display: grid;
+	border: thin solid black;
+	border-width: thin 0 0 thin;
+	grid-template-rows: repeat(3, auto);
+	grid-auto-rows: max-content;
+	grid-auto-flow: column;
+}
+
+#users>div {
+	background-color: lightgray;
+	padding: 0.1em;
+	border: thin solid black;
+	border-width: 0 thin thin 0;
+}
+
+#users>.fail {
+	background-color: red;
+	color: white;
+}
+
+#users>.buzzer {
+	background-color: green;
+}
+
+#name_prompt {
+	align-self: start;
+}
+
+#buzzer {
+	height: 4em;
+	width: 4em;
+	border-radius: 50%;
+	font-size: 4em;
+	background-color: red;
+}
+
+#admin {
+	background: #9cb997;
+	align-self: end;
+}
+
+#admin>div {
+	display: flex;
+	justify-content: space-between;
+	padding: 0.1em;
+}
