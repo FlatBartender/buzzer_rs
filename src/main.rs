@@ -16,7 +16,6 @@ type UserId = u64;
 
 use std::time::{Duration, Instant};
 use std::collections::HashSet;
-use std::sync::Mutex;
 
 #[derive(Message, Clone, Serialize)]
 #[rtype(result = "()")]
@@ -72,6 +71,7 @@ pub enum SessionStatus {
 
 // Represents a Session, which has exactly one admin and any number of clients.
 pub struct Session {
+    id: SessionId,
     name: String,
     timer: Duration,
     timer_handle: Option<SpawnHandle>,
@@ -83,6 +83,7 @@ pub struct Session {
     last_uid: UserId,
     status: SessionStatus,
     clients: HashMap<UserId, (Addr<Client>, String)>,
+    manager: Addr<BuzzerMainState>,
 }
 
 impl Session {
@@ -141,6 +142,7 @@ impl Handler<ClientMessage> for Session {
             ClientMessage::CloseSession{from} => {
                 if self.admin == from {
                     self.broadcast(SessionMessage::Closed);
+                    self.manager.do_send(SessionControlMessage::Delete{id: self.id});
                     ctx.stop();
                 }
             },
@@ -167,7 +169,8 @@ impl Handler<ClientMessage> for Session {
                 self.clients.remove(&from);
                 if self.admin == from {
                     self.broadcast(SessionMessage::Closed);
-                    //ctx.stop();
+                    self.manager.do_send(SessionControlMessage::Delete{id: self.id});
+                    ctx.stop();
                 } else {
                     self.broadcast(SessionMessage::Disconnected{id: from});
                 }
@@ -276,6 +279,71 @@ struct BuzzerMainState {
     sessions: HashMap<SessionId, Addr<Session>>,
 }
 
+impl Actor for BuzzerMainState {
+    type Context = Context<Self>;
+}
+
+enum SessionControlResponse {
+    Addr(Addr<Session>),
+    Id(SessionId),
+    NotFound,
+    Ok,
+}
+
+#[derive(Message)]
+#[rtype(result = "SessionControlResponse")]
+enum SessionControlMessage {
+    Create{name: String, timer: u64},
+    Get{id: SessionId},
+    Delete{id: SessionId},
+}
+
+impl Handler<SessionControlMessage> for BuzzerMainState {
+    type Result = MessageResult<SessionControlMessage>;
+    fn handle(&mut self, msg: SessionControlMessage, ctx: &mut Self::Context) -> Self::Result {
+        match msg {
+            SessionControlMessage::Create{name, timer} => {
+                let mut session_id = random();
+                while self.sessions.contains_key(&session_id) {
+                    session_id = random();
+                }
+
+
+                let s = Session {
+                    id: session_id,
+                    name: name.clone(),
+                    timer: Duration::from_secs(timer),
+                    timer_handle: None,
+                    timer_last_start: Instant::now(),
+                    elapsed: Duration::from_secs(0),
+                    blacklist: HashSet::new(),
+                    admin: 0,
+                    last_uid: 0,
+                    status: SessionStatus::Waiting,
+                    clients: HashMap::new(),
+                    manager: ctx.address().clone(),
+                };
+
+                let addr = s.start();
+                self.sessions.insert(session_id, addr);
+                MessageResult(SessionControlResponse::Id(session_id))
+            },
+            SessionControlMessage::Delete{id} => {
+                let ans = self.sessions.remove(&id);
+                match ans {
+                    Some(_) => MessageResult(SessionControlResponse::Ok),
+                    None => MessageResult(SessionControlResponse::NotFound),
+                }
+            },
+            SessionControlMessage::Get{id} => {
+                match self.sessions.get(&id) {
+                    Some(addr) => MessageResult(SessionControlResponse::Addr(addr.clone())),
+                    None => MessageResult(SessionControlResponse::NotFound),
+                }
+            }
+        }
+    }
+}
 
 #[get("/")]
 async fn lobby(tera: web::Data<Tera>) -> impl Responder {
@@ -295,41 +363,50 @@ struct CreateQuery {
 }
 
 #[get("/create")]
-async fn create(query: web::Query<CreateQuery>, data: web::Data<Mutex<BuzzerMainState>>) -> impl Responder {
-    let s = Session {
-        name: query.name.clone(),
-        timer: Duration::from_secs(query.timer),
-        timer_handle: None,
-        timer_last_start: Instant::now(),
-        elapsed: Duration::from_secs(0),
-        blacklist: HashSet::new(),
-        admin: 0,
-        last_uid: 0,
-        status: SessionStatus::Waiting,
-        clients: HashMap::new(),
-    };
-
-    let mut lock = data.lock().unwrap();
-    let mut session_id = random();
-    while lock.sessions.contains_key(&session_id) {
-        session_id = random();
+async fn create(query: web::Query<CreateQuery>, data: web::Data<Addr<BuzzerMainState>>) -> impl Responder {
+    match data.send(SessionControlMessage::Create{name: query.name.clone(), timer: query.timer}).await {
+        Err(err) => {
+            error!("Failed to create session: {}", err);
+            HttpResponse::InternalServerError().finish()
+        },
+        Ok(SessionControlResponse::Id(id)) => {
+            HttpResponse::Found().header(http::header::LOCATION, format!("/session/{:x}", id)).finish()
+        },
+        _ => {
+            warn!("Got unimplemented match arm in create route!");
+            HttpResponse::BadRequest().finish()
+        }
     }
 
-    let addr = s.start();
-    lock.sessions.insert(session_id, addr);
-    HttpResponse::Found().header(http::header::LOCATION, format!("/session/{:x}", session_id)).finish()
 }
 
 #[get("/session/{session_id}")]
-async fn session(web::Path(session_id): web::Path<String>, tera: web::Data<Tera>) -> impl Responder {
+async fn session(web::Path(session_id): web::Path<String>, tera: web::Data<Tera>, data: web::Data<Addr<BuzzerMainState>>) -> impl Responder {
     let session_id = match SessionId::from_str_radix(session_id.as_ref(), 16) {
         Err(err) => {
             error!("Unable to parse session ID: {}", err);
-            return HttpResponse::NotFound().body("Not Found");
+            return HttpResponse::BadRequest().finish()
         },
         Ok(id) => id
     };
-    
+
+    let _ = match data.send(SessionControlMessage::Get{id: session_id}).await {
+        Err(err) => {
+            error!("Failed to retrieve session: {}", err);
+            return HttpResponse::InternalServerError().finish();
+        },
+        Ok(SessionControlResponse::Addr(addr)) => {
+            addr
+        },
+        Ok(SessionControlResponse::NotFound) => {
+            return HttpResponse::NotFound().finish();
+        },
+        _ => {
+            warn!("Got unimplemented match arm in session http route!");
+            return HttpResponse::BadRequest().finish();
+        }
+    };
+
     let mut context = tera::Context::new();
     context.insert("id", &session_id);
     context.insert("id_display", &format!("{:x}", session_id));
@@ -343,20 +420,32 @@ async fn session(web::Path(session_id): web::Path<String>, tera: web::Data<Tera>
 }
 
 #[get("/session/{session_id}/ws")]
-async fn session_ws(req: HttpRequest, stream: web::Payload, web::Path(session_id): web::Path<String>, data: web::Data<Mutex<BuzzerMainState>>) -> Result<HttpResponse, actix_web::Error> {
+async fn session_ws(req: HttpRequest, stream: web::Payload, web::Path(session_id): web::Path<String>, data: web::Data<Addr<BuzzerMainState>>) -> Result<HttpResponse, actix_web::Error> {
     let session_id = match SessionId::from_str_radix(session_id.as_ref(), 16) {
         Err(err) => {
             error!("Unable to parse session ID: {}", err);
-            return Ok(HttpResponse::NotFound().body("Not Found"));
+            return Ok(HttpResponse::BadRequest().finish())
         },
         Ok(id) => id
     };
- 
-    let lock = data.lock().unwrap();
-    let s = match lock.sessions.get(&session_id) {
-        None => return Ok(HttpResponse::NotFound().finish()),
-        Some(s) => s,
+
+    let s = match data.send(SessionControlMessage::Get{id: session_id}).await {
+        Err(err) => {
+            error!("Failed to retrieve session: {}", err);
+            return Ok(HttpResponse::InternalServerError().finish());
+        },
+        Ok(SessionControlResponse::Addr(addr)) => {
+            addr
+        },
+        Ok(SessionControlResponse::NotFound) => {
+            return Ok(HttpResponse::NotFound().finish());
+        },
+        _ => {
+            warn!("Got unimplemented match arm in session ws route!");
+            return Ok(HttpResponse::BadRequest().finish());
+        }
     };
+
     let client = Client {
         id: 0,
         session: s.clone(),
@@ -369,7 +458,8 @@ async fn session_ws(req: HttpRequest, stream: web::Payload, web::Path(session_id
 async fn main() -> std::io::Result<()> {
     pretty_env_logger::init();
 
-    let buzzer_state = web::Data::new(Mutex::new(BuzzerMainState::default()));
+    let buzzer = BuzzerMainState::default();
+    let buzzer_addr = web::Data::new(buzzer.start());
     let tera = match Tera::new("templates/**/*.html") {
         Ok(t) => t,
         Err(err) => {
@@ -382,7 +472,7 @@ async fn main() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(rand::thread_rng())
-            .app_data(buzzer_state.clone())
+            .app_data(buzzer_addr.clone())
             .app_data(tera.clone())
             .service(session)
             .service(session_ws)
