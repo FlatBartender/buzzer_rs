@@ -163,8 +163,14 @@ ws.onopen = function () {
 	buzzer.addEventListener("click", function () {
 		ws.send(JSON.stringify({type: "Buzz"}));
 	});
+	buzzer.addEventListener("focus", function (event) {
+		this.blur();
+	});
 	name.addEventListener("blur", function () {
 		ws.send(JSON.stringify({type: "ChangeName", name: name.value}));
+	});
+	name.addEventListener("keydown", function (event) {
+		event.stopPropagation();
 	});
 	reset_session.addEventListener("click", function () {
 		ws.send(JSON.stringify({type: "ResetSession"}));
@@ -181,7 +187,13 @@ ws.onopen = function () {
 	session_name.addEventListener("blur", function () {
 		ws.send(JSON.stringify({type: "ChangeSession", name: session_name.value, timer: parseInt(session_timer.value)}));
 	});
+	session_name.addEventListener("keydown", function (event) {
+		event.stopPropagation();
+	});
 	session_timer.addEventListener("blur", function () {
 		ws.send(JSON.stringify({type: "ChangeSession", name: session_name.value, timer: parseInt(session_timer.value)}));
+	});
+	session_timer.addEventListener("keydown", function (event) {
+		event.stopPropagation();
 	});
 }

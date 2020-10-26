@@ -17,7 +17,7 @@ type UserId = u64;
 use std::time::{Duration, Instant};
 use std::collections::HashSet;
 
-#[derive(Message, Clone, Serialize)]
+#[derive(Message, Clone, Serialize, Debug)]
 #[rtype(result = "()")]
 #[serde(tag = "type")]
 pub enum SessionMessage {
@@ -51,7 +51,7 @@ pub enum RawClientMessage {
     Connect,
 }
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub enum ClientMessage {
     // Trigger the buzz 
@@ -67,7 +67,7 @@ pub enum ClientMessage {
     Connect{addr: Addr<Client>},
 }
 
-#[derive(PartialEq, Clone, Serialize_repr)]
+#[derive(PartialEq, Clone, Serialize_repr, Debug)]
 #[repr(u8)]
 pub enum SessionStatus {
     Paused = 0,
@@ -76,6 +76,7 @@ pub enum SessionStatus {
 }
 
 // Represents a Session, which has exactly one admin and any number of clients.
+#[derive(Debug)]
 pub struct Session {
     id: SessionId,
     name: String,
@@ -121,6 +122,8 @@ impl Actor for Session {
 impl Handler<ClientMessage> for Session {
     type Result = ();
     fn handle(&mut self, msg: ClientMessage, ctx: &mut Self::Context) -> Self::Result {
+        debug!("Session received message {:?}", msg);
+
         match msg {
             ClientMessage::Buzz{from} =>  {
                 if self.status == SessionStatus::Running && !self.blacklist.contains(&from) {
@@ -223,6 +226,7 @@ impl Handler<ClientMessage> for Session {
 }
 
 // Represents a Client, which participates in the session and can send a buzz
+#[derive(Debug)]
 pub struct Client {
     id: UserId,
     session: Addr<Session>,
@@ -292,7 +296,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Client {
                 self.session.do_send(msg);
             },
             ws::Message::Binary(_) => error!("Unexpected binary"),
-            ws::Message::Pong(_) => { info!("Received pong") },
+            ws::Message::Pong(_) => {},
             ws::Message::Close(reason) => {
                 ctx.close(reason);
                 self.session.do_send(ClientMessage::Disconnected{from: self.id});
@@ -303,7 +307,7 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Client {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct BuzzerMainState {
     sessions: HashMap<SessionId, Addr<Session>>,
 }
