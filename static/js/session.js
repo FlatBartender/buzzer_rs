@@ -3,6 +3,7 @@ const SESSION_RUNNING = 1;
 const SESSION_WAITING = 2;
 
 let client = {};
+let buzz_sound = new Audio("/static/snd/buzz.ogg");
 let session = {clients: {}};
 session.status = SESSION_WAITING;
 
@@ -13,7 +14,9 @@ let users = document.getElementById("users");
 let name = document.getElementById("name");
 let admin = document.getElementById("admin");
 let start_session = document.getElementById("start_session");
+let pause_session = document.getElementById("pause_session");
 let reset_session = document.getElementById("reset_session");
+let reset_blacklist = document.getElementById("reset_blacklist");
 let session_name = document.getElementById("session_name");
 let session_timer = document.getElementById("session_timer");
 
@@ -78,6 +81,7 @@ ws.addEventListener("message", function (event) {
 				session.left -= 100;
 				if (session.left >= 0) timer.textContent = (session.left / 1000).toFixed(1);
 			}, 100);
+			session.status = SESSION_RUNNING;
 			update_clients();
 			break;
 		case "Reset":
@@ -89,14 +93,28 @@ ws.addEventListener("message", function (event) {
 			clearInterval(session.timer_interval);
 			session.left = session.timer * 1000;
 			timer.textContent = session.timer.toFixed(1);
+			session.status = SESSION_WAITING;
+			update_clients();
+			break;
+		case "BlacklistCleared":
+			for (client of Object.values(session.clients)) {
+				client.buzz = undefined;
+				client.fail = undefined;
+			}
+			delete session.buzzer;
 			update_clients();
 			break;
 		case "Buzzed":
 			session.clients[msg.id].buzz = true;
 			session.buzzer = msg.id;
 			session.status = SESSION_PAUSED;
+			buzz_sound.play();
 			clearInterval(session.timer_interval);
 			update_clients();
+			break;
+		case "Paused":
+			session.status = SESSION_PAUSED;
+			clearInterval(session.timer_interval);
 			break;
 		case "Disconnected":
 			delete session.clients[msg.id];
@@ -120,6 +138,28 @@ ws.addEventListener("message", function (event) {
 
 ws.onopen = function () {
 	ws.send(JSON.stringify({type: "Connect"}));
+	document.addEventListener('keydown', function(event) {
+		console.log(event);
+		switch (event.key) {
+			case "r":
+				ws.send(JSON.stringify({type: "ResetSession"}));
+				break;
+			case " ":
+				switch(session.status) {
+					case SESSION_RUNNING:
+						ws.send(JSON.stringify({type: "PauseSession"}));
+						break;
+					case SESSION_WAITING:
+					case SESSION_PAUSED:
+						ws.send(JSON.stringify({type: "ResumeSession"}));
+						break;
+				}
+				break;
+			case "c":
+				ws.send(JSON.stringify({type: "ResetBlacklist"}));
+				break;
+		}
+	});
 	buzzer.addEventListener("click", function () {
 		ws.send(JSON.stringify({type: "Buzz"}));
 	});
@@ -129,8 +169,14 @@ ws.onopen = function () {
 	reset_session.addEventListener("click", function () {
 		ws.send(JSON.stringify({type: "ResetSession"}));
 	});
+	pause_session.addEventListener("click", function () {
+		ws.send(JSON.stringify({type: "PauseSession"}));
+	});
 	resume_session.addEventListener("click", function () {
 		ws.send(JSON.stringify({type: "ResumeSession"}));
+	});
+	reset_blacklist.addEventListener("click", function () {
+		ws.send(JSON.stringify({type: "ResetBlacklist"}));
 	});
 	session_name.addEventListener("blur", function () {
 		ws.send(JSON.stringify({type: "ChangeSession", name: session_name.value, timer: parseInt(session_timer.value)}));

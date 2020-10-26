@@ -26,6 +26,8 @@ pub enum SessionMessage {
     Closed,
     // The u64 here is used to keep clock drift in check. It's the number of milliseconds left.
     Resumed{left: u64},
+    Paused,
+    BlacklistCleared,
     Changed{name: String, timer: u64}, // Timer is in seconds
     Connected{name: String, id: UserId},
     ChangedName{name: String, id: UserId},
@@ -42,7 +44,9 @@ pub enum RawClientMessage {
     ChangeSession{name: String, timer: u64}, // Timer is in seconds
     CloseSession,
     ResumeSession,
+    PauseSession,
     ResetSession,
+    ResetBlacklist,
     Disconnected,
     Connect,
 }
@@ -56,7 +60,9 @@ pub enum ClientMessage {
     ChangeSession{from: UserId, name: String, timer: u64}, // Timer is in seconds
     CloseSession{from: UserId},
     ResumeSession{from: UserId},
+    PauseSession{from: UserId},
     ResetSession{from: UserId},
+    ResetBlacklist{from: UserId},
     Disconnected{from: UserId},
     Connect{addr: Addr<Client>},
 }
@@ -157,12 +163,29 @@ impl Handler<ClientMessage> for Session {
                     ));
                 }
             },
+            ClientMessage::PauseSession{from} => {
+                if self.admin == from && self.status == SessionStatus::Running {
+                    if let Some(handle) = self.timer_handle {
+                        ctx.cancel_future(handle);
+                    }
+                    let elapsed = Instant::now() - self.timer_last_start;
+                    self.elapsed += elapsed;
+                    self.status = SessionStatus::Paused;
+                    self.broadcast(SessionMessage::Paused);
+                }
+            },
             ClientMessage::ResetSession{from} => {
                 if self.admin == from {
                     if let Some(handle) = self.timer_handle {
                         ctx.cancel_future(handle);
                     }
                     self.reset();
+                }
+            },
+            ClientMessage::ResetBlacklist{from} => {
+                if self.admin == from {
+                    self.blacklist.clear();
+                    self.broadcast(SessionMessage::BlacklistCleared);
                 }
             },
             ClientMessage::Disconnected{from} => {
@@ -207,6 +230,10 @@ pub struct Client {
 
 impl Actor for Client {
     type Context = ws::WebsocketContext<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        ctx.run_interval(Duration::from_secs(10), |_, ctx| ctx.ping(b"keep-alive"));
+    }
 }
 
 impl Handler<SessionMessage> for Client {
@@ -256,14 +283,16 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for Client {
                     RawClientMessage::ChangeSession{name, timer} => ClientMessage::ChangeSession{from, name, timer},
                     RawClientMessage::CloseSession => ClientMessage::CloseSession{from},
                     RawClientMessage::ResumeSession => ClientMessage::ResumeSession{from},
+                    RawClientMessage::PauseSession => ClientMessage::PauseSession{from},
                     RawClientMessage::ResetSession => ClientMessage::ResetSession{from},
+                    RawClientMessage::ResetBlacklist => ClientMessage::ResetBlacklist{from},
                     RawClientMessage::Disconnected => ClientMessage::Disconnected{from},
                     RawClientMessage::Connect => ClientMessage::Connect{addr: ctx.address().clone()},
                 };
                 self.session.do_send(msg);
             },
             ws::Message::Binary(_) => error!("Unexpected binary"),
-            ws::Message::Pong(_) => {},
+            ws::Message::Pong(_) => { info!("Received pong") },
             ws::Message::Close(reason) => {
                 ctx.close(reason);
                 self.session.do_send(ClientMessage::Disconnected{from: self.id});
@@ -307,7 +336,6 @@ impl Handler<SessionControlMessage> for BuzzerMainState {
                 while self.sessions.contains_key(&session_id) {
                     session_id = random();
                 }
-
 
                 let s = Session {
                     id: session_id,
