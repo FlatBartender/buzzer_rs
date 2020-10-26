@@ -39,7 +39,7 @@ body {
 	background-image: url("/static/img/pampafond.png");
 	background-color: #9cb997;
 	background-repeat: no-repeat;
-	background-position: bottom;
+	background-position: right bottom;
 	padding: 1em;
 	width: 50%;
 	flex-grow: 2;
